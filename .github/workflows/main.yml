@@ -1,7 +1,10 @@
 name: main
 on:
   workflow_dispatch:
-  # push:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/main.yml'
   schedule:
     - cron: 1 16 * * *
 jobs:
