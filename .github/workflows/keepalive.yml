@@ -1,0 +1,69 @@
+name: keepalive
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.keepalive'
+  schedule:
+    # 每天 03:00 UTC（北京时间 11:00）检查一次
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.PAT || github.token }}
+          fetch-depth: 1
+
+      - name: 重新启用被禁用的签到工作流
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "未配置 PAT，跳过自动启用检查"
+            exit 0
+          fi
+          state=$(gh api "repos/${GH_REPO}/actions/workflows/main.yml" --jq '.state')
+          echo "main.yml 当前状态: ${state}"
+          case "${state}" in
+            disabled_inactivity|disabled_manually)
+              gh workflow enable main.yml
+              echo "已重新启用 main.yml"
+              ;;
+            *)
+              echo "无需处理"
+              ;;
+          esac
+
+      - name: 定期保活提交
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if [ -s .keepalive ]; then
+            last=$(date -u -d "$(cat .keepalive)" +%s 2>/dev/null || echo 0)
+          else
+            last=0
+          fi
+          now=$(date -u +%s)
+          age=$(( (now - last) / 86400 ))
+          if [ "${age}" -lt 45 ]; then
+            echo "距上次保活 ${age} 天，未满 45 天，跳过提交"
+            exit 0
+          fi
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive
+          git add .keepalive
+          git commit -m "chore: keepalive $(date -u +%Y-%m-%d)"
+          git push
